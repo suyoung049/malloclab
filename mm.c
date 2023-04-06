@@ -95,6 +95,8 @@ void *mm_realloc(void *ptr, size_t size)
     return newptr;
 }
 
+void *mm_realloc_insert(void *ptr, size_t size){}
+
 
 
 
