@@ -143,7 +143,7 @@ int mm_init(void)
 
 static void *find_first(size_t asize){
     char *bp;
-    bp = 
+    bp = (char *)mem_heap_lo() + DSIZE;
 }
 
 /* 
