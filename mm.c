@@ -126,7 +126,7 @@ static void *extend_heap(size_t words){
  */
 int mm_init(void)
 {
-    char *heap_listp;
+    static char *heap_listp;
 
     if ((heap_listp = mem_sbrk(4*WSIZE)) == (void *)-1)
         return -1;
@@ -144,6 +144,33 @@ int mm_init(void)
 static void *find_first(size_t asize){
     char *bp;
     bp = (char *)mem_heap_lo() + DSIZE;
+
+    while (bp <= (char *)mem_heap_hi())
+    {
+        if (!GET_ALLOC(HDRP(bp)) && GET_SIZE(HDRP(bp)) >= asize){
+            return (void *)bp;
+        } 
+        bp = NEXT_BLKP(bp);
+    }
+
+    return NULL;  
+}
+
+void place(char *bp, size_t asize){
+    size_t empty_size = GET_SIZE(HDRP(bp));
+
+    PUT(HDRP(bp), PACK(asize, 1));
+    PUT(FTRP(bp), PACK(asize, 1));
+
+    if (empty_size == asize){
+        return;
+    }
+
+    size_t remain_size = empty_size - asize;
+    // 남은 공간이 최소 블록 크기보다 큰 경우
+    PUT(HDRP(NEXT_BLKP(bp)), PACK(remain_size, 0));
+    PUT(FTRP(NEXT_BLKP(bp)), PACK(remain_size, 0));
+    
 }
 
 /* 
@@ -166,7 +193,7 @@ void *mm_malloc(size_t size)
     asize = DSIZE * ((size + (DSIZE) + (DSIZE-1))/DSIZE);
    }
    
-   if ((bp = find_fit(asize)) != NULL){
+   if ((bp = find_first(asize)) != NULL){
     place(bp, asize);
     return bp;
    }
@@ -196,24 +223,26 @@ void mm_free(void *ptr)
 /*
  * mm_realloc - Implemented simply in terms of mm_malloc and mm_free
  */
-void *mm_realloc(void *ptr, size_t size)
-{
-    void *oldptr = ptr;
-    void *newptr;
-    size_t copySize;
-    
-    newptr = mm_malloc(size);
-    if (newptr == NULL)
-      return NULL;
-    copySize = *(size_t *)((char *)oldptr - SIZE_T_SIZE);
-    if (size < copySize)
-      copySize = size;
-    memcpy(newptr, oldptr, copySize);
-    mm_free(oldptr);
-    return newptr;
+void *mm_realloc(void *ptr, size_t size){
+    if(size <= 0){ 
+        mm_free(ptr);
+        return 0;
+    }
+    if(ptr == NULL){
+        return mm_malloc(size); 
+    }
+    void *newp = mm_malloc(size); 
+    if(newp == NULL){
+        return 0;
+    }
+    size_t oldsize = GET_SIZE(HDRP(ptr));
+    if(size < oldsize){
+    	oldsize = size; 
+	}
+    memcpy(newp, ptr, oldsize); 
+    mm_free(ptr);
+    return newp;
 }
-
-void *mm_realloc_insert(void *ptr, size_t size){}
 
 
 
