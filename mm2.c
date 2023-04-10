@@ -41,7 +41,7 @@ team_t team = {
 #define ALIGN(size) (((size) + (ALIGNMENT-1)) & ~0x7)
 
 // define 오른쪽 실행을 왼쪽 명령어로 실행
-#define SIZE_T_SIZE (ALIGN(sizeof(size_t)))//
+#define SIZE_T_SIZE (ALIGN(sizeof(size_t)))
 
 #define WSIZE 4
 #define DSIZE 8
@@ -68,32 +68,6 @@ team_t team = {
 #define NEXT_BLKP(bp) ((char *)(bp) + GET_SIZE(((char *)(bp) - WSIZE)))
 #define PREV_BLKP(bp) ((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE)))
 
-#define PREV_FREE_ADDRESS(bp) (*(void **)(bp))
-#define NEXT_FREE_ADDRESS(bp) (*(void **)(bp + WSIZE))
-
-
-static char* heap_listp = NULL; 
-
-
-static void add_address(void *bp){
-    NEXT_FREE_ADDRESS(bp) = heap_listp;
-    PREV_FREE_ADDRESS(heap_listp) = bp;
-    PREV_FREE_ADDRESS(bp) = NULL;
-    heap_listp = bp;
-}
-
-static void remove_address(void *bp){
-    if (bp == heap_listp){
-        PREV_FREE_ADDRESS(NEXT_FREE_ADDRESS(bp)) = NULL;
-        heap_listp = NEXT_FREE_ADDRESS(bp);
-    }
-    else {//넥스트 어드레스의 전 주소를 나의 전 주소로 리셋
-    //전 어드레스의 다음 주소를 나의 다음 주소로 리셋
-        NEXT_FREE_ADDRESS(PREV_FREE_ADDRESS(bp)) = NEXT_FREE_ADDRESS(bp);
-        PREV_FREE_ADDRESS(NEXT_FREE_ADDRESS(bp)) = PREV_FREE_ADDRESS(bp);
-    }
-}
-
 static void *coalesce(void *bp){
 
     size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));
@@ -102,36 +76,30 @@ static void *coalesce(void *bp){
 
     // case 1
     if (prev_alloc && next_alloc){
-        add_address(bp);
+        return bp;
     }
     // case 2
     else if (prev_alloc && !next_alloc){
-        remove_address(NEXT_BLKP(bp));
         size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
         PUT(HDRP(bp), PACK(size, 0));
-        PUT(FTRP(bp), PACK(size, 0));
-        add_address(bp);
+        PUT(FTRP(bp), PACK(size, 0));   
     }
     //case 3
     else if (!prev_alloc && next_alloc){
-        remove_address(PREV_BLKP(bp));
         size += GET_SIZE(HDRP(PREV_BLKP(bp)));
-        PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
         PUT(FTRP(bp), PACK(size, 0));
+        PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
         bp = PREV_BLKP(bp);
-        add_address(bp);
     }
+
     else {
-        remove_address(NEXT_BLKP(bp));
-        remove_address(PREV_BLKP(bp));
         size += GET_SIZE(HDRP(PREV_BLKP(bp))) + GET_SIZE(FTRP(NEXT_BLKP(bp)));
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
         PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
         bp = PREV_BLKP(bp);
-        add_address(bp);
     }
-
     return bp;
+
 }
 
 static void *extend_heap(size_t words){
@@ -151,7 +119,6 @@ static void *extend_heap(size_t words){
     PUT(FTRP(bp), PACK(size, 0));
     PUT(HDRP(NEXT_BLKP(bp)), PACK(0,1));
 
-
     return coalesce(bp);
 }
 /* 
@@ -159,17 +126,15 @@ static void *extend_heap(size_t words){
  */
 int mm_init(void)
 {
-    if ((heap_listp = mem_sbrk(6*WSIZE)) == (void *)-1)
+    char *heap_listp;
+
+    if ((heap_listp = mem_sbrk(4*WSIZE)) == (void *)-1)
         return -1;
-        
     PUT(heap_listp, 0);
-    PUT(heap_listp + (1*WSIZE), PACK(DSIZE*2, 1));
-    PUT(heap_listp + (2*WSIZE), NULL);
-    PUT(heap_listp + (3*WSIZE), NULL);
-    PUT(heap_listp + (4*WSIZE), PACK(DSIZE*2, 1));
-    PUT(heap_listp + (5*WSIZE), PACK(0, 1));
-    
-    heap_listp += DSIZE;
+    PUT(heap_listp + (1*WSIZE), PACK(DSIZE, 1));
+    PUT(heap_listp + (2*WSIZE), PACK(DSIZE, 1));
+    PUT(heap_listp + (3*WSIZE), PACK(0, 1));
+    heap_listp += (2*WSIZE);
 
     if (extend_heap(CHUNKSIZE/WSIZE) == NULL)
         return -1;
@@ -178,49 +143,34 @@ int mm_init(void)
 
 static void *find_first(size_t asize){
     char *bp;
-    bp = (void *)heap_listp;
+    bp = (char *)mem_heap_lo() + DSIZE;
 
-    while (GET_ALLOC(HDRP(bp)) != 1)
-    { 
-        if (GET_SIZE(HDRP(bp)) >= asize){
+    while (bp <= (char *)mem_heap_hi())
+    {
+        if (!GET_ALLOC(HDRP(bp)) && GET_SIZE(HDRP(bp)) >= asize){
             return (void *)bp;
         } 
-        
-        bp = NEXT_FREE_ADDRESS(bp);
+        bp = NEXT_BLKP(bp);
     }
 
     return NULL;  
 }
 
-// static void *find_first(size_t asize) {
-//     void *bp;
-    
-//     // header block을 만날 때까지 for문 탐색
-//     for (bp = heap_listp; GET_ALLOC(HDRP(bp)) != 1; bp = NEXT_FREE_ADDRESS(bp)) {
-//         if (GET_SIZE(HDRP(bp)) >= asize)
-//             return bp;
-//     }
-//     return NULL;
-// }
-
-static void place(void *bp, size_t asize) {
+void place(char *bp, size_t asize){
     size_t empty_size = GET_SIZE(HDRP(bp));
-    remove_address(bp);
 
-    // 최소블럭크기 미만의 오차로 딱 맞다면 - 그냥 헤더, 푸터만 갱신해주면 됨
-    if ((empty_size - asize) < 2*DSIZE ) {
-        PUT(HDRP(bp), PACK(empty_size, 1));
-        PUT(FTRP(bp), PACK(empty_size, 1));
+    PUT(HDRP(bp), PACK(asize, 1));
+    PUT(FTRP(bp), PACK(asize, 1));
+
+    if (empty_size == asize){
+        return;
     }
-    // 넣고도 최소블럭크기 이상으로 남으면 - 헤더는 업데이트, 남은 블록 별도로 헤더, 푸터 처리
-    else {
-        PUT(HDRP(bp), PACK(asize, 1));
-        PUT(FTRP(bp), PACK(asize, 1));
-        bp = NEXT_BLKP(bp);
-        PUT(HDRP(bp), PACK(empty_size - asize, 0));
-        PUT(FTRP(bp), PACK(empty_size - asize, 0));
-        add_address(bp);
-    }
+
+    size_t remain_size = empty_size - asize;
+    // 남은 공간이 최소 블록 크기보다 큰 경우
+    PUT(HDRP(NEXT_BLKP(bp)), PACK(remain_size, 0));
+    PUT(FTRP(NEXT_BLKP(bp)), PACK(remain_size, 0));
+    
 }
 
 /* 
@@ -292,18 +242,4 @@ void *mm_realloc(void *ptr, size_t size){
     mm_free(ptr);
     return newp;
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
