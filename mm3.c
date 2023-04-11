@@ -57,16 +57,13 @@ team_t team = {
 #define PACK(size, alloc) ((size)|(alloc))
 
 #define GET(p) (*(unsigned int *)(p))
-#define PUT(p, val) (*(unsigned int *)(p)=(val))
+#define PUT(p, val) (*(unsigned int *)(p) = (val))
 
 #define GET_SIZE(p) (GET(p) & ~0x7)
 #define GET_ALLOC(p) (GET(p) & 0x1)
 
 #define HDRP(bp) ((char *)(bp) - WSIZE)
-
-#define NXRP(bp) ((char *)(bp) - WSIZE)
-#define BPRP(bn) ((char *)(bn) - WSIZE)
-
+#define FTRP(bp) ((char *)(bp) + GET_SIZE(HDRP(bp)) - DSIZE)
 
 #define NEXT_BLKP(bp) ((char *)(bp) + GET_SIZE(((char *)(bp) - WSIZE)))
 #define PREV_BLKP(bp) ((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE)))
@@ -75,86 +72,66 @@ team_t team = {
 #define NEXT_FREE_ADDRESS(bp) (*(void **)(bp + WSIZE))
 
 
-static char* heap_listp = NULL;
-// 2^3 ~ 2^32
-void* segregated_list[30]; 
+static char* heap_listp = NULL; 
 
 
 static void add_address(void *bp){
     NEXT_FREE_ADDRESS(bp) = heap_listp;
     PREV_FREE_ADDRESS(heap_listp) = bp;
-    PREV_FREE_ADDRESS(bp) = 0;
+    PREV_FREE_ADDRESS(bp) = NULL;
     heap_listp = bp;
 }
 
 static void remove_address(void *bp){
     if (bp == heap_listp){
-        PREV_FREE_ADDRESS(NEXT_FREE_ADDRESS(bp)) = 0;
+        PREV_FREE_ADDRESS(NEXT_FREE_ADDRESS(bp)) = NULL;
         heap_listp = NEXT_FREE_ADDRESS(bp);
     }
-    else {
-        //넥스트 어드레스의 전 주소를 나의 전 주소로 리셋
-        //전 어드레스의 다음 주소를 나의 다음 주소로 리셋
+    else {//넥스트 어드레스의 전 주소를 나의 전 주소로 리셋
+    //전 어드레스의 다음 주소를 나의 다음 주소로 리셋
         NEXT_FREE_ADDRESS(PREV_FREE_ADDRESS(bp)) = NEXT_FREE_ADDRESS(bp);
         PREV_FREE_ADDRESS(NEXT_FREE_ADDRESS(bp)) = PREV_FREE_ADDRESS(bp);
     }
 }
 
-// static void *coalesce(void *bp){
+static void *coalesce(void *bp){
 
-//     size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));
-//     size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
-//     size_t size = GET_SIZE(HDRP(bp));
+    size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));
+    size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
+    size_t size = GET_SIZE(HDRP(bp));
 
-//     // case 1
-//     if (prev_alloc && next_alloc){
-//         add_address(bp);
-//     }
-//     // case 2
-//     else if (prev_alloc && !next_alloc){
-//         remove_address(NEXT_BLKP(bp));
-//         size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
-//         PUT(HDRP(bp), PACK(size, 0));
-//         PUT(FTRP(bp), PACK(size, 0));
-//         add_address(bp);
-//     }
-//     //case 3
-//     else if (!prev_alloc && next_alloc){
-//         remove_address(PREV_BLKP(bp));
-//         size += GET_SIZE(HDRP(PREV_BLKP(bp)));
-//         PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
-//         PUT(FTRP(bp), PACK(size, 0));
-//         bp = PREV_BLKP(bp);
-//         add_address(bp);
-//     }
-//     else {
-//         remove_address(NEXT_BLKP(bp));
-//         remove_address(PREV_BLKP(bp));
-//         size += GET_SIZE(HDRP(PREV_BLKP(bp))) + GET_SIZE(FTRP(NEXT_BLKP(bp)));
-//         PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
-//         PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
-//         bp = PREV_BLKP(bp);
-//         add_address(bp);
-//     }
-
-//     return bp;
-// }
-
-static void* find_index(size_t *asize){
-    for (int i=0; i <30; i++){
-        if (asize == 1<<(i+3)){
-            return &segregated_list[i];
-        }
+    // case 1
+    if (prev_alloc && next_alloc){
+        add_address(bp);
     }
-}
+    // case 2
+    else if (prev_alloc && !next_alloc){
+        remove_address(NEXT_BLKP(bp));
+        size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
+        PUT(HDRP(bp), PACK(size, 0));
+        PUT(FTRP(bp), PACK(size, 0));
+        add_address(bp);
+    }
+    //case 3
+    else if (!prev_alloc && next_alloc){
+        remove_address(PREV_BLKP(bp));
+        size += GET_SIZE(HDRP(PREV_BLKP(bp)));
+        PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
+        PUT(FTRP(bp), PACK(size, 0));
+        bp = PREV_BLKP(bp);
+        add_address(bp);
+    }
+    else {
+        remove_address(NEXT_BLKP(bp));
+        remove_address(PREV_BLKP(bp));
+        size += GET_SIZE(HDRP(PREV_BLKP(bp))) + GET_SIZE(FTRP(NEXT_BLKP(bp)));
+        PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
+        PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
+        bp = PREV_BLKP(bp);
+        add_address(bp);
+    }
 
-static void delete_free_list(unsigned int* index, size_t* asize){
-    if (*index == NULL)
-        return;  // 수정된 부분
-
-    if (**index != NULL){
-        *index = **index;
-    } 
+    return bp;
 }
 
 static void *extend_heap(size_t words){
@@ -171,26 +148,31 @@ static void *extend_heap(size_t words){
         return NULL;
 
     PUT(HDRP(bp), PACK(size, 0));
+    PUT(FTRP(bp), PACK(size, 0));
     PUT(HDRP(NEXT_BLKP(bp)), PACK(0,1));
 
 
-    return (bp);
+    return coalesce(bp);
 }
 /* 
  * mm_init - initialize the malloc package.
  */
 int mm_init(void)
-{   for (int i=0; i<10; i++){
-    segregated_list[i] = NULL;
-}
-    if ((heap_listp = mem_sbrk(2*WSIZE)) == (void *)-1)
+{
+    if ((heap_listp = mem_sbrk(6*WSIZE)) == (void *)-1)
         return -1;
         
     PUT(heap_listp, 0);
-    PUT(heap_listp + (1*WSIZE), PACK(0,1));
-
-
+    PUT(heap_listp + (1*WSIZE), PACK(DSIZE*2, 1));
+    PUT(heap_listp + (2*WSIZE), NULL);
+    PUT(heap_listp + (3*WSIZE), NULL);
+    PUT(heap_listp + (4*WSIZE), PACK(DSIZE*2, 1));
+    PUT(heap_listp + (5*WSIZE), PACK(0, 1));
+    
     heap_listp += DSIZE;
+
+    if (extend_heap(CHUNKSIZE/WSIZE) == NULL)
+        return -1;
     return 0;
 }
 
@@ -210,6 +192,16 @@ static void *find_first(size_t asize){
     return NULL;  
 }
 
+// static void *find_first(size_t asize) {
+//     void *bp;
+    
+//     // header block을 만날 때까지 for문 탐색
+//     for (bp = heap_listp; GET_ALLOC(HDRP(bp)) != 1; bp = NEXT_FREE_ADDRESS(bp)) {
+//         if (GET_SIZE(HDRP(bp)) >= asize)
+//             return bp;
+//     }
+//     return NULL;
+// }
 
 static void place(void *bp, size_t asize) {
     size_t empty_size = GET_SIZE(HDRP(bp));
@@ -231,10 +223,6 @@ static void place(void *bp, size_t asize) {
     }
 }
 
-void *divide_chunk(){
-
-}
-
 /* 
  * mm_malloc - Allocate a block by incrementing the brk pointer.
  *     Always allocate a block whose size is a multiple of the alignment.
@@ -244,33 +232,28 @@ void *mm_malloc(size_t size)
    size_t asize;
    size_t extendsize;
    char *bp;
-   unsigned int *index;
 
    if (size == 0){
     return NULL;
    }
 
-   if (size <= WSIZE){
-    asize = DSIZE;
+   if (size <= DSIZE){
+    asize = 2*DSIZE;
    } else {
-    asize = DSIZE * ((size + (WSIZE) + (DSIZE-1))/DSIZE);
+    asize = DSIZE * ((size + (DSIZE) + (DSIZE-1))/DSIZE);
    }
    
-//    if ((bp = find_first(asize)) != NULL){
-//     place(bp, asize);
-//     return bp;
-//    }
-
-    index = find_index(asize);
-    delete_free_list(index, asize);
-
-    extendsize = MAX(asize, CHUNKSIZE);
-    if ((bp = extend_heap(extendsize/WSIZE)) == NULL) {
-        return NULL;
-    }
-
-    divide_chunk(bp, asize);
+   if ((bp = find_first(asize)) != NULL){
+    place(bp, asize);
     return bp;
+   }
+
+   extendsize = MAX(asize, CHUNKSIZE);
+   if ((bp = extend_heap(extendsize/WSIZE)) == NULL) {
+    return NULL;
+   }
+   place(bp, asize);
+   return bp;
 
 }
 /*
@@ -309,6 +292,7 @@ void *mm_realloc(void *ptr, size_t size){
     mm_free(ptr);
     return newp;
 }
+
 
 
 
