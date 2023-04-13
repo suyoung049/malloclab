@@ -84,7 +84,7 @@ static void add_address(void *bp){
 
 static void remove_address(void *bp){
     if (bp == heap_listp){
-        PREV_FREE_ADDRESS(NEXT_FREE_ADDRESS(bp)) = NULL;
+        PREV_FREE_ADDRESS(NEXT_FREE_ADDRESS(bp)) = 0;
         heap_listp = NEXT_FREE_ADDRESS(bp);
     }
     else {//넥스트 어드레스의 전 주소를 나의 전 주소로 리셋
@@ -164,8 +164,8 @@ int mm_init(void)
         
     PUT(heap_listp, 0);
     PUT(heap_listp + (1*WSIZE), PACK(DSIZE*2, 1));
-    PUT(heap_listp + (2*WSIZE), NULL);
-    PUT(heap_listp + (3*WSIZE), NULL);
+    PUT(heap_listp + (2*WSIZE), 0);
+    PUT(heap_listp + (3*WSIZE), 0);
     PUT(heap_listp + (4*WSIZE), PACK(DSIZE*2, 1));
     PUT(heap_listp + (5*WSIZE), PACK(0, 1));
     
@@ -180,7 +180,8 @@ static void *find_first(size_t asize){
     char *bp;
     bp = (void *)heap_listp;
 
-    while (GET_ALLOC(HDRP(bp)) != 1)
+    //GET_ALLOC(HDRP(bp))
+    while (bp != NULL)
     { 
         if (GET_SIZE(HDRP(bp)) >= asize){
             return (void *)bp;
